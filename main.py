@@ -338,7 +338,10 @@ async def chat_completions(
                             if content.get("type") == "attachments":
                                 file_list = content.get("attachments")
                                 for file in file_list:
-                                    attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}:{port}/cluster-proxy/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
+                                    if port:
+                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}:{port}/cluster-proxy/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
+                                    else:
+                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}/cluster-proxy/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
                                 yield f"data: {json.dumps(create_chat_completion_data(attachments_url, request.model))}\n\n"
                     yield f"data: {json.dumps(create_chat_completion_data('', request.model, 'stop'))}\n\n"
                     yield "data: [DONE]\n\n"
