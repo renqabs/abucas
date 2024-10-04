@@ -5,3 +5,4 @@ pyinstaller
 python-dotenv
 starlette
 uvicorn
+requests

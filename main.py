@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 import httpx
+import requests
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Request
@@ -39,67 +40,38 @@ headers = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     'x-abacus-org-host': 'apps'
 }
+abacus_maps = {
+    "GPT-4o": "gpt-4o",
+    "Claude Sonnet 3.5": "claude-3-5-sonnet",
+    "RouteLLM": "RouteLLM",
+    "SearchLLM": "SearchLLM",
+    "Llama-3.1 405B": "llama-3.1-405b",
+    "Gemini 1.5 Pro-002": "gemini-1.5-pro-002",
+    "Abacus.AI Smaug": "Abacus.AI-Smaug",
+    "o1 Preview": "o1-preview",
+    "o1 Mini": "o1-mini",
+    "GPT-4o Mini": "gpt-4o-mini",
+
+}
+empty_template = {
+    "deploymentId": "",
+    "externalApplicationId": "",
+    "llmName": ""
+}
 models_info_abacus = {
-    "gpt-4o-mini": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "1611427b5c",
-        "llmName": "OPENAI_GPT4O_MINI",
-    },
-    "gpt-4": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "1598d72ad2",
-        "llmName": "OPENAI_GPT4_128K_LATEST",
-    },
-    "gpt-4o": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "13b729e8aa",
-        "llmName": "OPENAI_GPT4O_LATEST",
-               },
-    "o1-preview": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "13d9c1197e",
-        "llmName": "OPENAI_O1",
-    },
-    "o1-mini": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "13a61ed8f4",
-        "llmName": "OPENAI_O1_MINI",
-    },
-    "claude-3-5-sonnet": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "142f953934",
-        "llmName": "CLAUDE_V3_5_SONNET",
-                          },
-    "RouteLLM": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "296d569f0",
-        "llmName": "ROUTE_LLM",
-               },
-    "SearchLLM": {
-        "deploymentId": "bd1ce4fc8",
-        "externalApplicationId": "166888117e",
-        "llmName": "OPENAI_GPT4O_LATEST",
-               },
-    "llama-3.1-405b": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "181e006fa",
-        "llmName": "LLAMA3_1_405B",
-               },
-    "gemini-1.5-pro-002": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "14a80089be",
-        "llmName": "GEMINI_1_5_PRO",
-               },
-    "Abacus.AI-Smaug": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "15206bda48",
-        "llmName": "ABACUS_SMAUG3",
-    },
-    "llama-3.1-70b": {
-        "deploymentId": "c7fab66ee",
-        "externalApplicationId": "1598d72ad2",
-        "llmName": "LLAMA3_1_70B",
-    },
+    model_name: empty_template.copy()
+    for model_name in [
+        "gpt-4o-mini",
+        "gpt-4o",
+        "o1-preview",
+        "o1-mini",
+        "claude-3-5-sonnet",
+        "RouteLLM",
+        "SearchLLM",
+        "llama-3.1-405b",
+        "gemini-1.5-pro-002",
+        "Abacus.AI-Smaug"
+    ]
 }
 
 APP_SECRET = os.getenv("APP_SECRET", "666")
@@ -107,7 +79,6 @@ COOKIES = os.getenv("COOKIES", "")
 ALLOWED_MODELS = [
     {"id": "gpt-4o-mini", "name": "gpt-4o-mini"},
     {"id": "gpt-4o", "name": "gpt-4o"},
-    {"id": "gpt-4", "name": "gpt-4"},
     {"id": "o1-preview", "name": "o1-preview"},
     {"id": "o1-mini", "name": "o1-mini"},
     {"id": "claude-3-5-sonnet", "name": "claude-3-5-sonnet"},
@@ -115,7 +86,6 @@ ALLOWED_MODELS = [
     {"id": "SearchLLM", "name": "SearchLLM"},
     {"id": "llama-3.1-405b", "name": "llama-3.1-405b"},
     {"id": "gemini-1.5-pro-002", "name": "gemini-1.5-pro-002"},
-    {"id": "llama-3.1-70b", "name": "llama-3.1-70b"},
     {"id": "Abacus.AI-Smaug", "name": "Abacus.AI-Smaug"},
 ]
 # 配置CORS
@@ -145,6 +115,28 @@ def get_cookies(cookie_str):
     keys_remain = ['_a_p', '_ss_p', '_u_p', '_s_p']
     filtered_cookies = {key: cookies[key] for key in keys_remain if key in cookies}
     return filtered_cookies
+
+
+def update_models_info(cookies):
+    url = 'https://abacus.ai/api/v0/listExternalApplications'
+    data = {
+        "includeSearchLlm": True
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_cookies(cookies), json=data)
+        response.raise_for_status()  # Raises stored HTTPError, if one occurred.
+        json_response = response.json()
+        if json_response["success"]:
+            for item in json_response["result"]:
+                if item["name"] in abacus_maps.keys():
+                    models_info_abacus[abacus_maps.get(item["name"])]["deploymentId"] = item["deploymentId"]
+                    models_info_abacus[abacus_maps.get(item["name"])]["externalApplicationId"] = item["externalApplicationId"]
+                    models_info_abacus[abacus_maps.get(item["name"])]["llmName"] = item["predictionOverrides"]["llmName"]
+            logger.info("Update Model Info Successfully")
+    except httpx.HTTPStatusError as http_err:
+        logger.error(f"HTTP error occurred: {http_err}")
+    except Exception as err:
+        logger.error(f"An error occurred: {err}")
 
 
 def simulate_data(content, model):
@@ -220,6 +212,29 @@ def replace_escaped_newlines(input_string: str) -> str:
     return input_string.replace("\\n", "\n")
 
 
+async def update_models_info_async(cookies):
+    url = 'https://abacus.ai/api/v0/listExternalApplications'
+    data = {
+        "includeSearchLlm": True
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, cookies=cookies, json=data)
+            response.raise_for_status()  # Raises stored HTTPError, if one occurred.
+            json_response = response.json()
+            if json_response["success"]:
+                for item in json_response["result"]:
+                    if item["name"] in abacus_maps.keys():
+                        models_info_abacus[abacus_maps.get(item["name"])]["deploymentId"] = item["deploymentId"]
+                        models_info_abacus[abacus_maps.get(item["name"])]["externalApplicationId"] = item["externalApplicationId"]
+                        models_info_abacus[abacus_maps.get(item["name"])]["llmName"] = item["predictionOverrides"]["llmName"]
+                logger.info("Update Model Info Successfully")
+        except httpx.HTTPStatusError as http_err:
+            logger.error(f"HTTP error occurred: {http_err}")
+        except Exception as err:
+            logger.error(f"An error occurred: {err}")
+
+
 async def create_conversation(model, cookies):
     url = 'https://apps.abacus.ai/cluster-proxy/api/createDeploymentConversation'
     data = {
@@ -232,8 +247,8 @@ async def create_conversation(model, cookies):
             response = await client.post(url, headers=headers, cookies=cookies, json=data)
             response.raise_for_status()  # Raises stored HTTPError, if one occurred.
             json_response = response.json()
-            logger.info("Deployment Conversation Created Successfully")
             if json_response["success"]:
+                logger.info("Deployment Conversation Created Successfully")
                 return json_response["result"]["deploymentConversationId"]
         except httpx.HTTPStatusError as http_err:
             logger.error(f"HTTP error occurred: {http_err}")
@@ -358,7 +373,6 @@ async def chat_completions(
                                           deploymentConversationId)
                 raise HTTPException(status_code=500, detail=str(e))
 
-
     if request.stream:
         logger.info("Streaming response")
         return StreamingResponse(generate(), media_type="text/event-stream")
@@ -388,6 +402,6 @@ async def chat_completions(
         }
 
 
-
 if __name__ == "__main__":
+    update_models_info(COOKIES)
     uvicorn.run(app, host="0.0.0.0", port=7860)
