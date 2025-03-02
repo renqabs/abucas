@@ -41,18 +41,26 @@ headers = {
     'x-abacus-org-host': 'apps'
 }
 abacus_maps = {
+    "RouteLLM": "routellm",
     "GPT-4o": "gpt-4o",
     "Claude Sonnet 3.5": "claude-3-5-sonnet",
-    "RouteLLM": "RouteLLM",
-    "SearchLLM": "SearchLLM",
-    "Llama-3.1 405B": "llama-3.1-405b",
-    "Gemini 1.5 Pro-002": "gemini-1.5-pro-002",
-    "Abacus.AI Smaug": "Abacus.AI-Smaug",
-    "o1 Preview": "o1-preview",
+    "Claude Sonnet 3.7": "claude-3-7-sonnet",
+    "o3 Mini High": "o3-mini-high",
     "o1 Mini": "o1-mini",
+    "o1": "o1",
+    "Deepseek R1 Fast": "deepseek-r1-fast",
+    "Deepseek R1": "deepseek-r1",
+    "Gemini 2.0 Pro": "gemini-2.0-pro",
+    "Gemini 2.0 Flash": "gemini-2.0-flash",
     "GPT-4o Mini": "gpt-4o-mini",
-
+    "Grok": "grok",
+    "Deepseek V3": "deepseek-v3",
+    "Abacus.AI Smaug": "abacus.ai-smaug",
+    "Llama-3.1 405B": "llama-3.1-405b",
+    "SearchLLM": "searchllm",
 }
+
+ReasoningModels = ["claude-3-7-sonnet-think","o3-mini-high","o1-mini","o1","deepseek-r1-fast","deepseek-r1"]
 empty_template = {
     "deploymentId": "",
     "externalApplicationId": "",
@@ -60,34 +68,12 @@ empty_template = {
 }
 models_info_abacus = {
     model_name: empty_template.copy()
-    for model_name in [
-        "gpt-4o-mini",
-        "gpt-4o",
-        "o1-preview",
-        "o1-mini",
-        "claude-3-5-sonnet",
-        "RouteLLM",
-        "SearchLLM",
-        "llama-3.1-405b",
-        "gemini-1.5-pro-002",
-        "Abacus.AI-Smaug"
-    ]
+    for model_name in list(abacus_maps.values())
 }
 
 APP_SECRET = os.getenv("APP_SECRET", "666")
 COOKIES = os.getenv("COOKIES", "")
-ALLOWED_MODELS = [
-    {"id": "gpt-4o-mini", "name": "gpt-4o-mini"},
-    {"id": "gpt-4o", "name": "gpt-4o"},
-    {"id": "o1-preview", "name": "o1-preview"},
-    {"id": "o1-mini", "name": "o1-mini"},
-    {"id": "claude-3-5-sonnet", "name": "claude-3-5-sonnet"},
-    {"id": "RouteLLM", "name": "RouteLLM"},
-    {"id": "SearchLLM", "name": "SearchLLM"},
-    {"id": "llama-3.1-405b", "name": "llama-3.1-405b"},
-    {"id": "gemini-1.5-pro-002", "name": "gemini-1.5-pro-002"},
-    {"id": "Abacus.AI-Smaug", "name": "Abacus.AI-Smaug"},
-]
+ALLOWED_MODELS = [{"id": value, "name": key} for key, value in abacus_maps.items()] + [{"id": "claude-3-7-sonnet-think", "name": "Claude Sonnet 3.7 Think"}]
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
@@ -215,7 +201,8 @@ def replace_escaped_newlines(input_string: str) -> str:
 async def update_models_info_async(cookies):
     url = 'https://abacus.ai/api/v0/listExternalApplications'
     data = {
-        "includeSearchLlm": True
+        "includeSearchLlm": True,
+        "isDesktop": True
     }
     async with httpx.AsyncClient() as client:
         try:
@@ -236,7 +223,7 @@ async def update_models_info_async(cookies):
 
 
 async def create_conversation(model, cookies):
-    url = 'https://apps.abacus.ai/cluster-proxy/api/createDeploymentConversation'
+    url = 'https://apps.abacus.ai/api/createDeploymentConversation'
     data = {
         "deploymentId": models_info_abacus[model]['deploymentId'],
         "name": "New Chat",
@@ -257,7 +244,7 @@ async def create_conversation(model, cookies):
 
 
 async def delete_conversation(cookies, deploymentId, deploymentConversationId):
-    url = "https://apps.abacus.ai/cluster-proxy/api/deleteDeploymentConversation"
+    url = "https://apps.abacus.ai/api/deleteDeploymentConversation"
     payload = {
         "deploymentId": deploymentId,
         "deploymentConversationId": deploymentConversationId
@@ -279,7 +266,7 @@ async def list_models():
     return {"object": "list", "data": ALLOWED_MODELS}
 
 
-@app.get("/cluster-proxy/api/downloadAgentAttachment")
+@app.get("/api/downloadAgentAttachment")
 async def downloadAgentAttachment(request: Request = None):
     cookies = get_cookies(COOKIES)
     original_url = request.url
@@ -313,10 +300,14 @@ async def chat_completions(
             status_code=400,
             detail=f"Model {request.model} is not allowed. Allowed models are: {', '.join(model['id'] for model in ALLOWED_MODELS)}",
         )
-
+    is_claude_thinking_model = request.model == "claude-3-7-sonnet-think"
+    is_reasoning_model = True if request.model in ReasoningModels else False
+    if is_claude_thinking_model:
+        request.model = "claude-3-7-sonnet"
     cookies = get_cookies(COOKIES)
     deploymentConversationId = await create_conversation(request.model,cookies)
     # 使用 OpenAI API
+
     json_data = {
         "requestId": str(uuid.uuid4()),
         "deploymentConversationId": deploymentConversationId,
@@ -333,6 +324,8 @@ async def chat_completions(
         "llmName": models_info_abacus[request.model]['llmName'],
         "externalApplicationId": models_info_abacus[request.model]['externalApplicationId']
     }
+    if is_claude_thinking_model:
+        json_data['useThinking'] = True
     host = raw_request.url.hostname
     port = raw_request.url.port
     scheme = raw_request.url.scheme
@@ -342,6 +335,7 @@ async def chat_completions(
             try:
                 async with client.stream('POST', 'https://apps.abacus.ai/api/_chatLLMSendMessageSSE', headers=headers, cookies=cookies, json=json_data, timeout=120.0) as response:
                     response.raise_for_status()
+                    thinking_end = True
                     async for line in response.aiter_lines():
                         if line and (not json.loads(line).get("end")):
                             content = json.loads(line)
@@ -349,14 +343,23 @@ async def chat_completions(
                                 markdown_url = f"\n ![{content.get('imgGenerationPrompt', '')}]({content.get('segment', '')}) \n"
                                 yield f"data: {json.dumps(create_chat_completion_data(markdown_url, request.model))}\n\n"
                             if content.get("type") == "text":
-                                yield f"data: {json.dumps(create_chat_completion_data(content.get('segment', ''), request.model))}\n\n"
+                                cnt = content.get('segment', '')
+                                if is_reasoning_model:
+                                    if content.get("isSpinny") is True:
+                                        cnt = f'<think>\n'
+                                        thinking_end = False
+                                    if thinking_end is False:
+                                        if content.get("isSpinny") is None:
+                                            thinking_end = True
+                                            cnt = f'\n</think>{cnt}'
+                                yield f"data: {json.dumps(create_chat_completion_data(cnt, request.model))}\n\n"
                             if content.get("type") == "attachments":
                                 file_list = content.get("attachments")
                                 for file in file_list:
                                     if port:
-                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}:{port}/cluster-proxy/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
+                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}:{port}/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
                                     else:
-                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}/cluster-proxy/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
+                                        attachments_url = f"\n [{file.get('filename')}]({scheme}://{host}/api/downloadAgentAttachment?deploymentId={models_info_abacus[request.model]['deploymentId']}&attachmentId={file.get('attachment_id')}) \n"
                                 yield f"data: {json.dumps(create_chat_completion_data(attachments_url, request.model))}\n\n"
                     yield f"data: {json.dumps(create_chat_completion_data('', request.model, 'stop'))}\n\n"
                     yield "data: [DONE]\n\n"
